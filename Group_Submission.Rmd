@@ -1,0 +1,398 @@
+---
+title: "Home Credit Default Risk Modelling Submission(Group-3)"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 2
+  pdf_document: default
+---
+
+## A. Introduction
+
+**Project Goal**:The goal of the Home Credit Default Risk Kaggle project is to develop predictive models that accurately assess the credit default risk of loan applicants. Specifically, the project aims to predict whether a loan applicant is likely to default on their loan, with the broader objective of improving responsible lending practices and financial inclusion for individuals with limited or no credit history.
+
+**Business Problems:**
+Credit Risk Assessment: Home Credit Group faces the challenge of evaluating the creditworthiness of loan applicants who may not have a traditional credit history. Accurate assessment of credit risk is crucial to minimize loan defaults and associated financial losses.
+
+Financial Inclusion: The project seeks to address the problem of financial exclusion by providing loans to individuals who are often underserved by traditional lenders. It aims to offer a positive borrowing experience to those with limited access to credit.
+
+**Analytic Problems**:
+Prediction of Loan Defaults: The primary analytical problem is to build predictive models that can effectively predict whether a loan applicant is likely to default on their loan. This involves analyzing historical data to identify patterns and features that are indicative of default.
+
+Data Preprocessing: Dealing with missing values, outliers, and transforming the data into a suitable format for modeling is an essential part of the analysis.
+
+Feature Engineering: Identifying and creating relevant features that contribute to the prediction of loan defaults. This may involve exploring interactions between variables and deriving meaningful features from the available data.
+
+**Purpose of the notebook:**
+
+The purpose of this notebook is to submit the final results for the Home Credit Default risk Kaggle group project, with the end goal of creating an accurate model to classify whether or not an individual will repay a loan. One of the key components that generally enables an individual to receive a loan is credit history; however, not all consumers have a sufficient credit history to be eligible for loans, even if they would otherwise be considered worthy recipients. Additionally, the datasets available to analyze the worthiness of an applicant can be messy and require various data transformations. As such, it is our task to take into consideration other alternative factors to determine the creditworthiness of individuals applying for a home loan, transform the data appropriately, and create a satisfactory model. 
+
+Our group leveraged various analytic and machine learning approaches to finalize a high performance model. Prior to this, we individually conducted exploratory data analysis, data preparation, and model submission. Greg started the process off by helping with some in depth EDA, data transformation, and problem wire framing, then We submitted modeling in Kaggle using Hunter's logistic regression model (0.59), Tom's h2o and lime model to do a matrix statistic analysis (0.68), and Hari's XGBoost modeling (0.78). **The XGBoost resulted in the highest Kaggle score (0.78), and is therefore the model we settled on leveraging**.
+
+## B. Data Preparation
+
+The Home Credit dataset is derived from a real-world scenario and has been made available by Home Credit. This dataset encompasses multiple tables with a vast amount of information, including details about loan applicants, applicants' credit scores, and their historical repayment records. The primary objective of this dataset is to develop a predictive model capable of accurately assessing the probability of loan default for new applicants.
+
+The first step we had to take in this process is understanding the data we have, and establishing what data transformations need to occur before you can leverage your code to produce a working model. In this case, there wasn't a singular dataset, so we had to identify the relevant variables across multiple datasets, join the data, replace relevant NA values/max values that clearly didn't make sense, factor character data where it made sense to do so, and create our own featured engineered variables.
+
+### B.1 Setup
+
+Import libraries, data files:
+
+```{R data setup,  message = FALSE,  warning=FALSE}
+
+# Importing packages
+library(tidyverse)
+library(data.table)
+library(caret)
+library(xgboost)
+library(lightgbm)
+library(ggplot2)
+library(stats)
+
+
+## Importing files
+bbalance <- fread("bureau_balance.csv",showProgress = F) 
+bureau <- fread("bureau.csv",showProgress = F)
+cc_balance <- fread("credit_card_balance.csv",showProgress = F)
+payments <- fread("installments_payments.csv",showProgress = F) 
+pc_balance <- fread("POS_CASH_balance.csv",showProgress = F)
+prev <- fread("previous_application.csv",showProgress = F)
+train <- fread("application_train.csv",showProgress = F) 
+test <- fread("application_test.csv",showProgress = F)
+sub <- fread("sample_submission.csv",showProgress = F)
+
+```
+
+
+One of the most important and effective ways to digest and understand the data is to see visualizations or summaries of our data. Below are a few examples of some interesting relationships
+
+
+```{r}
+
+#Distribution of target:
+mean(train$TARGET)
+
+# Default by Gender
+#Calculate the mean of 'TARGET' by 'CODE_GENDER'
+target_by_gender <- aggregate(TARGET ~ CODE_GENDER, data = train, FUN = mean)
+
+#Create a bar plot of the mean 'TARGET' by gender
+ggplot(target_by_gender, aes(x = CODE_GENDER, y = TARGET, fill = CODE_GENDER)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Gender", y = "Mean Target", fill = "Gender") +
+  ggtitle("Default Rate by Gender")
+```
+```{r}
+# Default Rates by Credit Amount
+
+# Create credit bins
+credit_bins <- c(0, 100000, 200000, 300000, 400000, Inf)
+
+# Create a new data frame with credit bins and calculate default rate as a percentage
+data_train_summary <- train %>%
+  mutate(Credit_Range = cut(AMT_CREDIT, breaks = credit_bins, labels = c("0-100k", "100k-200k", "200k-300k", "300k-400k", ">400k"), include.lowest = TRUE)) %>%
+  group_by(Credit_Range) %>%
+  summarise(Default_Rate = mean(TARGET == 1) * 100)  # Calculate as percentage
+
+# Create a bar graph of default percentage by credit range
+ggplot(data_train_summary, aes(x = Credit_Range, y = Default_Rate, fill = Credit_Range)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Credit Range", y = "Default Percentage", fill = "Credit Range") +
+  ggtitle("Default Percentage by Credit Range")
+
+```
+
+### B.2 Data Transformation
+
+This code chunk implements the functionality as metioned below:
+1. It loads several datasets and converts character data to factors.
+2. The data is grouped by unique identifiers and summary statistics (mean, standard deviation, sum) are calculated for each group.
+3. Some specific values in columns are replaced with NA to handle missing data.
+These steps are part of a broader data analysis for this machine learning project, where the goal is to prepare the data for further analysis.
+
+
+```{r factor transformation,  message = FALSE, warning=FALSE}
+
+# Function preparation, summary statistics 
+fn <- funs(mean, sd, sum, .args = list(na.rm = TRUE))
+
+summary_fns <- list(
+  mean = mean, 
+  sd = sd,
+  sum = sum
+)
+
+
+# Mutating character data into factors for bbalance
+sum_bbalance <- bbalance %>%
+  mutate_if(is.character, ~as.integer(factor(.))) %>%
+  group_by(SK_ID_BUREAU) %>%
+  summarise_all(summary_fns)
+sum_bbalance <- fread('sum_bbalance.csv')
+
+# Bureau factor transformation
+sum_bureau <- bureau %>% 
+  left_join(sum_bbalance, by = "SK_ID_BUREAU") %>% 
+  select(-SK_ID_BUREAU) %>% 
+  mutate_if(is.character, ~as.integer(factor(.))) %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise_all(summary_fns)
+sum_bureau <- fread('sum_bureau.csv')
+
+
+# CC Balance transformation
+sum_cc_balance <- cc_balance %>% 
+  select(-SK_ID_PREV) %>% 
+  mutate_if(is.character, ~as.integer(factor(.))) %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise_all(summary_fns)
+sum_cc_balance <- fread('sum_cc_balance.csv')
+
+# Converting to numeric for future NA replacements
+sum_payments <- payments %>% 
+  select(-SK_ID_PREV) %>% 
+  mutate(PAYMENT_PERC = AMT_PAYMENT / AMT_INSTALMENT,
+         PAYMENT_DIFF = AMT_INSTALMENT - AMT_PAYMENT,
+         DPD = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT,
+         DBD = DAYS_INSTALMENT - DAYS_ENTRY_PAYMENT,
+         DPD = ifelse(DPD > 0, DPD, 0),
+         DBD = ifelse(DBD > 0, DBD, 0)) %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise_all(summary_fns)
+sum_payments <- fread('sum_payments.csv')
+
+
+# PC Balance Transformation
+sum_pc_balance <- pc_balance %>% 
+  select(-SK_ID_PREV) %>% 
+  mutate_if(is.character, ~as.integer(factor(.))) %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise_all(summary_fns)
+sum_pc_balance <- fread('sum_pc_balance.csv')
+
+
+# Convert max DAY values to NA for easier replacement later 
+sum_prev <- prev %>%
+  select(-SK_ID_PREV) %>% 
+  mutate_if(is.character, ~as.integer(factor(.))) %>% 
+  mutate(DAYS_FIRST_DRAWING = ifelse(DAYS_FIRST_DRAWING == 365243, NA, DAYS_FIRST_DRAWING),
+         DAYS_FIRST_DUE = ifelse(DAYS_FIRST_DUE == 365243, NA, DAYS_FIRST_DUE),
+         DAYS_LAST_DUE_1ST_VERSION = ifelse(DAYS_LAST_DUE_1ST_VERSION == 365243, NA, DAYS_LAST_DUE_1ST_VERSION),
+         DAYS_LAST_DUE = ifelse(DAYS_LAST_DUE == 365243, NA, DAYS_LAST_DUE),
+         DAYS_TERMINATION = ifelse(DAYS_TERMINATION == 365243, NA, DAYS_TERMINATION),
+         APP_CREDIT_PERC = AMT_APPLICATION / AMT_CREDIT) %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise_all(summary_fns)
+sum_prev <- fread('sum_prev.csv')
+
+```
+
+### B.3 Data joins and feature engineering
+
+Now that we have converted our relevant variables to factors, replaced non-numeric with numeric variables, and replaced maximum days with what we interpreted as missing values, we can create one condensed dataset by left joining all data on the SK_ID_CURR. Additionally, in our condensed dataset, we can create custom variables which may give additional insight into the worthiness of a loan recipient, such as relevant ratios, external source interactions, asset to family or asset to income information, etc.  
+
+Feature engineering in machine learning, including models like XGBoost, involves the process of creating, transforming, or selecting relevant input variables (features) to improve model performance. This can include generating new features, handling missing data, scaling, one-hot encoding categorical variables, and extracting domain-specific information. Effective feature engineering can enhance model accuracy, reduce overfitting, and reveal important patterns, ultimately leading to more robust and interpretable machine learning models. It requires domain knowledge, creativity, and experimentation to identify and engineer features that contribute to better predictive capabilities.
+
+```{r data join, message = FALSE, warning=FALSE}
+#Joining all the datasets
+trtest <- train %>% 
+  select(-TARGET) %>%
+  bind_rows(test) %>%
+  left_join(sum_bureau, by = "SK_ID_CURR") %>% 
+  left_join(sum_cc_balance, by = "SK_ID_CURR") %>% 
+  left_join(sum_payments, by = "SK_ID_CURR") %>% 
+  left_join(sum_pc_balance, by = "SK_ID_CURR") %>% 
+  left_join(sum_prev, by = "SK_ID_CURR") %>% 
+  select(-SK_ID_CURR) %>% 
+  mutate_if(is.character, ~as.integer(factor(.))) %>% 
+  mutate(na = apply(., 1, function(x) sum(is.na(x))),
+         DAYS_EMPLOYED = ifelse(DAYS_EMPLOYED == 365243, NA, DAYS_EMPLOYED),
+         DAYS_EMPLOYED_PERC = sqrt(DAYS_EMPLOYED / DAYS_BIRTH),
+         INCOME_CREDIT_PERC = AMT_INCOME_TOTAL / AMT_CREDIT,
+         INCOME_PER_PERSON = log1p(AMT_INCOME_TOTAL / CNT_FAM_MEMBERS),
+         ANNUITY_INCOME_PERC = sqrt(AMT_ANNUITY / (1 + AMT_INCOME_TOTAL)),
+         LOAN_INCOME_RATIO = AMT_CREDIT / AMT_INCOME_TOTAL,
+         ANNUITY_LENGTH = AMT_CREDIT / AMT_ANNUITY,
+         CHILDREN_RATIO = CNT_CHILDREN / CNT_FAM_MEMBERS, 
+         CREDIT_TO_GOODS_RATIO = AMT_CREDIT / AMT_GOODS_PRICE,
+         INC_PER_CHLD = AMT_INCOME_TOTAL / (1 + CNT_CHILDREN),
+         SOURCES_PROD = EXT_SOURCE_1 * EXT_SOURCE_2 * EXT_SOURCE_3,
+         CAR_TO_BIRTH_RATIO = OWN_CAR_AGE / DAYS_BIRTH,
+         CAR_TO_EMPLOY_RATIO = OWN_CAR_AGE / DAYS_EMPLOYED,
+         PHONE_TO_BIRTH_RATIO = DAYS_LAST_PHONE_CHANGE / DAYS_BIRTH,
+         PHONE_TO_EMPLOY_RATIO = DAYS_LAST_PHONE_CHANGE / DAYS_EMPLOYED) %>%
+    data.matrix()
+
+trtest[is.infinite(trtest)] <- NA
+sum(is.infinite(trtest))
+ind <- 1:nrow(train)
+y <- train$TARGET
+
+
+```
+
+### B.4 NA's
+
+We have a consolidated dataset, but we still have the problem of NA values.Missing values (NAs) in machine learning models can lead to reduced model performance, as many algorithms struggle to handle them. Imputation techniques may introduce bias, and if not handled properly, missing data can result in information loss. Careful consideration and appropriate strategies for dealing with NAs, such as imputation or creating a separate category for categorical variables, are essential for maintaining the integrity and effectiveness of the model. The below section comments how we can address this issue.
+
+```{r replace NAs,  message = FALSE, warning=FALSE}
+
+## Function displaying % missing values for each column
+msum <- function(df){
+  msum<-c()
+  for (col in colnames(df)){
+    msum <- c(msum,mean(is.na(df[,col])))
+  }
+  msum_new <- msum[msum>0]
+  msum_cols <- colnames(df)[msum>0]
+  msum <- data.frame('col_name' = msum_cols, 'perc_missing' = msum_new)
+  msum <- msum[order(msum[,2], decreasing = TRUE), ]
+  msum[,2] <- round(msum[,2],6)
+  rownames(msum) <- NULL
+  return(msum)
+}
+
+# Displaying which columns have missing values
+mval <- msum(trtest)
+mval
+
+#Imputing missing values with median
+for (col in mval$col_name){
+  trtest[is.na(trtest[,col]),col] <- median(trtest[,col], na.rm = TRUE)
+}
+
+
+fm <- function(x){sum(is.na(x))/length(x)*100}
+fm <- apply(trtest,2,fm)
+fm <- fm[fm > 0]
+fm <- fm[order(fm, decreasing=T)]
+fm
+
+```
+
+## C. Modeling Process
+
+**h20 and lime model:**
+Tom's process included leveraging libraries to manage, preprocess, and model the dataset. Initially, Tom set up his environment with tidyverse for data manipulation and skimr for a quick overview of his data. Tom also incorporated recipes for data preprocessing, which was essential for his feature engineering phase. His dataset was efficiently handled using data.table, renowned for its performance with large datasets, and he divided it into training, validation, and test subsets using caret. The focus then shifted to feature engineering, where he transformed character columns to factors and addressed missing values. For the modeling part, he chose the h2o package to train an XGBoost model, a decision influenced by its robustness and accuracy in predictive modeling. He evaluated the model's performance, utilizing the lime package to generate understandable explanations for the model's predictions. This approach not only helped him in achieving accurate predictions but also in gaining deep insights into the influential variables. This Model scored a (0.68) in Kaggle.
+
+**Logistic regression**:
+Within the logistic regression model, Hunter's first step was to convert all relevant character variables into factors. Hunter then checked the number of NA values, and divided them into two groups – those with over 100,000 observations and those with under 100,000 observations. For those under 100,000, he used the median numeric value as a stand in, and he considered the variables with that much missing data as too much noise for his model, and wanted to see how it would perform if he excluded them from the regression.He then made the remaining necessary numeric conversions, and used a stepwise function to identify appropriate variables, which he used as in the final logistic inputs:"CODE_GENDER","FLAG_OWN_CAR","FLAG_OWN_REALTY","AMT_CREDIT","NAME_EDUCATION_TYPE",and "NAME_HOUSING_TYPE". He then ran that model on test dataset, which resulted in a Kaggle score of 0.59.
+
+
+We have tried to implement Logisitc regression, XGBoosting, h20 and lime model and then came up with XGboost since it gave the best results.We have now made all the data preparation adjustments. Data has been cleaned, joined, missing values replaced, and additional variables have been feature engineered, and we can proceed with the modeling. XGBoost is a machine learning, black box algorithm which implements a sophisticated decision tree method to produce it's results.
+
+
+### C.1 XGBoost Model
+
+XGBoost (Extreme Gradient Boosting) is a powerful machine learning algorithm known for its speed and accuracy in both regression and classification tasks. It's an ensemble learning method that combines the predictions of multiple decision trees, effectively handling complex relationships in data. XGBoost is widely used in competitions and real-world applications due to its robustness and effectiveness.
+
+```{r xgboost,  message = FALSE,  warning=FALSE}
+
+#Partitioning the data
+test_xbg <- xgb.DMatrix(data = trtest[-ind, ])
+ival <- trtest[ind, ]
+prtn <- caret::createDataPartition(y, p = 0.9, list = F) %>% c() 
+train_xgb <- xgb.DMatrix(data = ival[prtn, ], label = y[prtn])
+val_xgbid <- xgb.DMatrix(data = ival[-prtn, ], label = y[-prtn])
+
+#Modelling-XGBoost
+p <- list(objective = "binary:logistic",
+          booster = "gbtree",
+          eval_metric = "auc",
+          nthread = 4,
+          eta = 0.05,
+          max_depth = 6,
+          min_child_weight = 30,
+          gamma = 0,
+          subsample = 0.85,
+          colsample_bytree = 0.7,
+          colsample_bylevel = 0.632,
+          alpha = 0,
+          lambda = 0,
+          nrounds = 100)
+
+set.seed = 123
+xgb.model <- xgb.train(p, train_xgb, p$nrounds, list(val = val_xgbid), print_every_n = 50, early_stopping_rounds = 100)
+
+# predictions
+xgb_pred <- predict(xgb.model, test_xbg)
+```
+The AUC (Area Under the Receiver Operating Characteristic Curve) of an XGBoost model measures its ability to distinguish between positive and negative classes. It quantifies the model's overall classification performance, with a higher AUC indicating better predictive power. A higher AUC suggests that the model is better at ranking positive instances higher than negative instances, making it a valuable metric for evaluating binary classification models.
+
+**In the above modelling using XGBoost, we have achieved an AUC of 0.77**
+
+### C.2 Cross Validation
+
+```{r Cross validation,  message = FALSE,  warning=FALSE}
+# Create a DMatrix for the entire dataset
+data_xgb <- xgb.DMatrix(data = ival, label = y)
+
+# Perform k-fold cross-validation
+num_folds = 5
+cv_result <- xgb.cv(params = p, data = data_xgb, nfold = num_folds, early_stopping_rounds = 5,nrounds=5, maximize = TRUE)
+# View the cross-validation results
+print(cv_result)
+
+```
+Cross-validation is a technique used in machine learning to assess the performance and generalizability of a predictive model. It involves dividing the dataset into multiple subsets (folds) to train and evaluate the model multiple times. The most common type of cross-validation is k-fold cross-validation, where the data is divided into k equal-sized folds. The following are its primary uses:Model Evaluation,Hyperparameter Tuning,Assessment of Model Variance,Model Selection,Handling Small Datasets.
+
+The average AUC on the training data across different cross-validation folds is approximately 0.74. This indicates how well the model fits the training data. In this case, a higher AUC suggests that the model can effectively separate positive and negative instances in the training data.The average AUC on the validation data (test data) across different cross-validation folds is approximately 0.73. This measures the model's ability to generalize to new, unseen data. A higher AUC on the test data is desirable, as it indicates the model's predictive power.
+
+
+## D. Model Performance
+
+### D.1 Creating Submission File
+
+Now that we have our model, the final step is to apply it to the test dataset and then make our submission. Using the XGBoost model, the finalized score was a 0.78 and the accuracy is 91%. 
+
+```{r submission file,  message = FALSE,  warning=FALSE}
+#Creating the submissions file
+sub <- data.table(sub$SK_ID_CURR,pred = xgb_pred)
+colnames(sub) <-  c("SK_ID_CURR","TARGET")
+#print submission file
+write.csv(sub, 'sub_xgb_lgb.csv', quote=F, na="", row.names=F)
+
+```
+
+### D.2 Accuracy
+
+Accuracy is an essential metric for evaluating a machine learning model as it measures the proportion of correctly classified instances. It provides a straightforward and intuitive measure of the model's overall performance.
+
+```{r accuracy,  message = FALSE,  warning=FALSE}
+# Calculate accuracy
+true_labels <- y[ind]
+predicted_labels <- ifelse(xgb_pred > 0.5, 1, 0)
+accuracy <- mean(true_labels == predicted_labels)
+if (!is.na(accuracy)) {
+  cat("Accuracy: ", accuracy * 100, "%\n")
+} else {
+  cat("Unable to calculate accuracy due to data issues.\n")
+}
+```
+
+### D.3 Run Time
+
+The trade off between something like a simple regression, which had lower Kaggle scores but a very low run time, and a machine learning model like XGBoost, which had significantly higher Kaggle scores but also took our machines a long time to run is something that each individual or organization has to take into consideration. In general, we would say that the improved performace justifies the extra computing cost in a project like this, but it would absolutely be worthy of running a cost-benefit analysis and compare performance of models against cost savings.
+
+## E. Results 
+
+**Model Effectiveness**: Our model enhances Home Credit's predictive capability for identifying potential loan defaults. This improvement positively influences Home Credit's financial performance by increasing the approval rate for creditworthy applicants while decreasing approvals for those who may not meet creditworthiness criteria.
+
+**Model Exploration and Selection**: Exploring a range of models allowed us to gain valuable insights into their strengths, weaknesses, and performance within the context of our task. This exploration played a pivotal role in our model selection, maximizing performance, understanding feature importance, assessing robustness, and leveraging model diversity for improved predictions and insightful information.
+
+**Optimal Model Selection:** Given the classification nature of the problem and the abundance of available classification models, we initiated our search by evaluating different options. We experimented with Gradient boosting, h20 and lime,logistic regression models.
+
+**Performance Evaluation:** Comparing the performances of these models was crucial in identifying the most suitable one. We also considered Kaggle scores to ensure alignment with the model's performance However, we had to address overfitting issues. While h20 and lime model, Gradient Boosting Machine models demonstrated similar performance, we opted for the Gradient Boosting Machine due to its faster training capabilities.
+
+Overall, our process consisted of forming a group strategy together, taking time to understand the data we were working with, then created various models of complexity to evaluate performance. After finalizing and submitting various models, we found that the XGBoost machine learning method was able to produce the highest Kaggle Score, even though it required the highest computing cost. This methodology produced great results, and helped all of us in the team learn more about the types of predictive analysis available to us in R. 
+
+## F. Group members and Contribution
+
+Collaboratively, we operated as a team using R studio where we conducted the modeling process. We successfully consolidated various code segments into a single notebook by utilizing different R packages.
+
+**Harichandana Gonuguntla**: Data preprocessing,missing data calculation and imputation. Feature Engineering, different datasets(bureau, bureau balance, previous application) aggregation for predictions, Modeled using XGBoosting multiple times using different parameters and datasets.
+**Hunter Harmer**:Logistic regression modelling, compiling the whole code into one notebbok, error resolution, adding content such as introduction, business problem and summarising the model's results into the notebook.
+**Tom Kingston:** h20 and lime modelling, data cleaning, error resolution.
+**Greg Francom:** Initial data analysis, data aggregation, trouble shooting.
