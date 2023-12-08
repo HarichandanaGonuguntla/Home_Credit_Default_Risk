@@ -1,6 +1,6 @@
 ## Home Credit Default Risk
 
-### **Business Problems:** ###
+### **Business Problem:** ###
 
 **Credit Risk Assessment:** Home Credit Group faces the challenge of evaluating the creditworthiness of loan applicants who may not have a traditional credit history. Accurate assessment of credit risk is crucial to minimize loan defaults and associated financial losses.
 
