@@ -1,5 +1,7 @@
 ## Home Credit Default Risk
 
+Home Credit is a global financial institution with a specialization in providing loans to individuals who have limited or inadequate credit histories. Their primary objective is to advance financial inclusion by offering easily accessible financial services to disadvantaged communities. Home Credit is known for its innovative financing solutions, utilizing unconventional data sources and alternative methods for assessing creditworthiness. Their customer-centric approach and streamlined lending process empower individuals to make significant purchases and establish a favorable credit record. Home Credit mitigates the lending risks associated with borrowers who have less-than-ideal credit histories through the use of advanced risk management models. In essence, they are committed to democratizing access to financial services and creating a positive social impact.
+
 ### **Business Problem:** ###
 
 **Credit Risk Assessment:** Home Credit Group faces the challenge of evaluating the creditworthiness of loan applicants who may not have a traditional credit history. Accurate assessment of credit risk is crucial to minimize loan defaults and associated financial losses.
@@ -22,13 +24,11 @@ We observed significant improvement over baseline models in terms of both accura
 ### **Business Value to the solution:** ###
  Here are some ways in which the XGBoost modeling that we developed can create business value for this problem:
  
-1. One of the primary business values is reducing loan defaults. By accurately identifying high-risk applicants, financial institutions can avoid lending to those who are likely to default. This reduces the financial losses associated with non-performing loans.
-2. Utilizing historical data and an extensive array of features, the model can discern patterns that may elude human observation. Consequently, this results in improved loan approval processes and a decrease in the likelihood of extending loans to individuals at higher risk of default.
-3. Better risk assessment and reduced loan defaults can lead to increased profitability for financial institutions. They can lend more confidently to low-risk applicants, charge lower interest rates, and attract more customers, all of which contribute to higher profits.
-4. Improved credit risk modeling can also help financial institutions comply with regulatory requirements.
-5. Implementing the XGBoost model also promotes a culture of data-driven decision-making within the organization, which can have long-term benefits for strategic planning and operations.
-6. Financial institutions can use XGBoost to target marketing efforts more effectively. By identifying potential customers who are likely to be creditworthy, they can focus their marketing campaigns on individuals who are more likely to apply for and be approved for loans.
-7. Institutions that excel in credit risk modeling using XGBoost can gain a competitive advantage. They can attract more customers, partners, and investors by showcasing their ability to make informed lending decisions and manage risk effectively.
+1. One of the primary business values is reducing loan defaults. By accurately identifying high-risk applicants, financial institutions can avoid lending to those who are likely to default. This reduces the financial losses associated with non-performing loans. At present, Homecredit is facing losses of around $13.85 billion, equivalent to approximately 7.52% of the total approved loan amount of $184.208 billion. The implementation of the XGBoost model has the potential to accurately predict defaults for 63.5% of these cases, resulting in potential savings of a substantial $8.8 billion.
+2. Better risk assessment and reduced loan defaults can lead to increased profitability for financial institutions. They can lend more confidently to low-risk applicants, charge lower interest rates, and attract more customers, all of which contribute to higher profits.
+3. Implementing the XGBoost model also promotes a culture of data-driven decision-making within the organization, which can have long-term benefits for strategic planning and operations.
+4. Financial institutions can use XGBoost to target marketing efforts more effectively. By identifying potential customers who are likely to be creditworthy, they can focus their marketing campaigns on individuals who are more likely to apply for and be approved for loans.
+5. Institutions that excel in credit risk modeling using XGBoost can gain a competitive advantage. They can attract more customers, partners, and investors by showcasing their ability to make informed lending decisions and manage risk effectively.
 
 ### **My contribution to the project:** ###
 I was involved in the heavy-lifting part of the project. I have done the data preprocessing, missing data calculation, imputation, feature Engineering, different datasets(bureau, bureau balance, previous application) aggregation for predictions, and Modeled using XGBoosting multiple times using different parameters and datasets.
